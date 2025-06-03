@@ -156,25 +156,54 @@ func getChainInfo(selector uint64) (chainInfo, error) {
 		}, nil
 	}
 
+	// ENHANCED: check custom chains
+	if isCustomSelector(selector) {
+		chainID, err := extractChainIdFromCustomSelector(selector)
+		if err == nil {
+			return chainInfo{
+				Family:  FamilyEVM,
+				ChainID: fmt.Sprintf("%d", chainID),
+				ChainDetails: ChainDetails{
+					ChainSelector: selector,
+					ChainName:     generateCustomChainName(chainID),
+				},
+			}, nil
+		}
+	}
+
 	return chainInfo{}, fmt.Errorf("unknown chain selector %d", selector)
 }
 
 func GetSelectorFamily(selector uint64) (string, error) {
 	chainInfo, err := getChainInfo(selector)
-	if err != nil {
-		return "", fmt.Errorf("unknown chain selector %d", selector)
+	if err == nil {
+		return chainInfo.Family, nil
 	}
 
-	return chainInfo.Family, nil
+	// ENHANCED: Try custom selector lookup
+	if isCustomSelector(selector) {
+		// All custom chains are EVM for now
+		return FamilyEVM, nil
+	}
+
+	return "", fmt.Errorf("unknown chain selector %d", selector)
 }
 
 func GetChainIDFromSelector(selector uint64) (string, error) {
 	chainInfo, err := getChainInfo(selector)
-	if err != nil {
-		return "", fmt.Errorf("unknown chain selector %d", selector)
+	if err == nil {
+		return chainInfo.ChainID, nil
 	}
 
-	return chainInfo.ChainID, nil
+	// ENHANCED: Try custom selector lookup
+	if isCustomSelector(selector) {
+		chainID, extractErr := extractChainIdFromCustomSelector(selector)
+		if extractErr == nil {
+			return strconv.FormatUint(chainID, 10), nil
+		}
+	}
+
+	return "", fmt.Errorf("unknown chain selector %d", selector)
 }
 
 func GetChainDetailsByChainIDAndFamily(chainID string, family string) (ChainDetails, error) {
@@ -182,12 +211,24 @@ func GetChainDetailsByChainIDAndFamily(chainID string, family string) (ChainDeta
 	case FamilyEVM:
 		evmChainId, err := strconv.ParseUint(chainID, 10, 64)
 		if err != nil {
-			return ChainDetails{}, fmt.Errorf("invalid chain id %s for %s", chainID, family)
+			return ChainDetails{}, fmt.Errorf("invalid chain id %s for %s sk", chainID, family)
 		}
 
 		details, exist := evmChainIdToChainSelector[evmChainId]
 		if !exist {
-			return ChainDetails{}, fmt.Errorf("invalid chain id %s for %s", chainID, family)
+			if isCustomChain(evmChainId) {
+				selector := generateCustomChainSelector(evmChainId)
+				name := generateCustomChainName(evmChainId)
+
+				fmt.Printf("🔧 Generated custom chain selector: %s (ID: %d, Selector: %d)\n",
+					name, evmChainId, selector)
+
+				return ChainDetails{
+					ChainSelector: selector,
+					ChainName:     name,
+				}, nil
+			}
+			return ChainDetails{}, fmt.Errorf("invalid chain id %s for %s sk", chainID, family)
 		}
 
 		return details, nil

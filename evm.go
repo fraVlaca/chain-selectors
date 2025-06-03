@@ -76,21 +76,34 @@ func ChainIdFromSelector(chainSelectorId uint64) (uint64, error) {
 			return k, nil
 		}
 	}
+
+	// Try custom selector lookup
+	if isCustomSelector(chainSelectorId) {
+		return extractChainIdFromCustomSelector(chainSelectorId)
+	}
+
 	return 0, fmt.Errorf("chain not found for chain selector %d", chainSelectorId)
 }
 
 // Deprecated, this only supports EVM chains, use the chain agnostic `GetChainDetailsByChainIDAndFamily` instead
+// ENHANCED: Now supports custom chains with deterministic generation
 func SelectorFromChainId(chainId uint64) (uint64, error) {
 	if chainSelectorId, exist := evmChainIdToChainSelector[chainId]; exist {
 		return chainSelectorId.ChainSelector, nil
 	}
-	return 0, fmt.Errorf("chain selector not found for chain %d", chainId)
+
+	// Try our custom chain selector generation
+	return GetCustomChainSelector(chainId)
 }
 
 // Deprecated, this only supports EVM chains, use the chain agnostic `NameFromChainId` instead
 func NameFromChainId(chainId uint64) (string, error) {
 	details, exist := evmChainIdToChainSelector[chainId]
 	if !exist {
+		// Try custom chain name generation
+		if isCustomChain(chainId) {
+			return generateCustomChainName(chainId), nil
+		}
 		return "", fmt.Errorf("chain name not found for chain %d", chainId)
 	}
 	if details.ChainName == "" {
@@ -110,6 +123,10 @@ func ChainIdFromName(name string) (uint64, error) {
 		if details, exist := evmChainIdToChainSelector[chainId]; exist && details.ChainName == "" {
 			return chainId, nil
 		}
+		// ENHANCED: Check if it's a custom chain
+		if isCustomChain(chainId) {
+			return chainId, nil
+		}
 	}
 	return 0, fmt.Errorf("chain not found for name %s", name)
 }
@@ -122,19 +139,61 @@ func TestChainIds() []uint64 {
 	return chainIds
 }
 
+// ENHANCED: Now supports custom chains
 func ChainBySelector(sel uint64) (Chain, bool) {
 	ch, exists := evmChainsBySelector[sel]
-	return ch, exists
+	if exists {
+		return ch, true
+	}
+
+	// Try custom selector lookup
+	if isCustomSelector(sel) {
+		chainID, err := extractChainIdFromCustomSelector(sel)
+		if err == nil {
+			// Create a synthetic Chain for custom chains
+			return Chain{
+				EvmChainID: chainID,
+				Selector:   sel,
+				Name:       generateCustomChainName(chainID),
+				VarName:    fmt.Sprintf("CUSTOM_TESTNET_%d", chainID),
+			}, true
+		}
+	}
+
+	return Chain{}, false
 }
 
+// ENHANCED: Now supports custom chains
 func ChainByEvmChainID(evmChainID uint64) (Chain, bool) {
 	ch, exists := evmChainsByEvmChainID[evmChainID]
-	return ch, exists
+	if exists {
+		return ch, true
+	}
+
+	// Try custom chain lookup
+	if isCustomChain(evmChainID) {
+		selector := generateCustomChainSelector(evmChainID)
+		name := generateCustomChainName(evmChainID)
+
+		return Chain{
+			EvmChainID: evmChainID,
+			Selector:   selector,
+			Name:       name,
+			VarName:    fmt.Sprintf("CUSTOM_TESTNET_%d", evmChainID),
+		}, true
+	}
+
+	return Chain{}, false
 }
 
+// ENHANCED: Now supports custom chains
 func IsEvm(chainSel uint64) (bool, error) {
 	_, exists := ChainBySelector(chainSel)
 	if !exists {
+		// Check if it's a custom selector
+		if isCustomSelector(chainSel) {
+			return true, nil
+		}
 		return false, fmt.Errorf("chain %d not found", chainSel)
 	}
 	// We always return true since only evm chains are supported atm.
