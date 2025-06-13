@@ -1,4 +1,4 @@
-module github.com/smartcontractkit/chain-selectors
+module github.com/fravlaca/chain-selectors
 
 go 1.20
 
