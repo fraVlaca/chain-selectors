@@ -12,19 +12,24 @@ import (
 // Any chain ID above this value will be treated as a custom chain
 const CUSTOM_CHAIN_RANGE = uint64(1000000)
 
+// No longer needed - using direct O(1) encoding/decoding
+// Keeping imports for backward compatibility if needed
+
 // deterministically generates a chain selector for any custom chain ID
 func generateCustomChainSelector(chainID uint64) uint64 {
-	// Create deterministic hash based on chain ID
-	hash := sha256.Sum256([]byte(fmt.Sprintf("custom-testnet-chain-%d", chainID)))
+	// Use direct encoding with 0xE prefix for O(1) bidirectional transformation
+	// This avoids collision with existing 0xD selectors and eliminates need for caching
 
-	// Convert to uint64 (first 8 bytes)
-	selector := binary.BigEndian.Uint64(hash[:8])
+	// Ensure chain ID fits in 60 bits (leaving 4 for 0xE marker)
+	if chainID > 0x0FFFFFFFFFFFFFFF {
+		// For very large chain IDs, fall back to hash-based approach
+		hash := sha256.Sum256([]byte(fmt.Sprintf("custom-testnet-chain-%d", chainID)))
+		selector := binary.BigEndian.Uint64(hash[:8])
+		return 0xE000000000000000 | (selector & 0x0FFFFFFFFFFFFFFF)
+	}
 
-	// Ensure it's in a safe range to avoid conflicts with official selectors
-	// Use high-bit pattern to mark as custom: 0xC000000000000000 + hash
-	selector = 0xC000000000000000 | (selector & 0x3FFFFFFFFFFFFFFF)
-
-	return selector
+	// Direct encoding: 0xE prefix + chain ID (O(1) reversible)
+	return 0xE000000000000000 | chainID
 }
 
 // generateCustomChainName creates a name for custom chains
@@ -34,14 +39,14 @@ func generateCustomChainName(chainID uint64) string {
 
 // isCustomChain determines if a chain ID should be treated as custom
 func isCustomChain(chainID uint64) bool {
-	// Check if it's above our custom range OR not in official selectors
-	return chainID >= CUSTOM_CHAIN_RANGE || !isInOfficialSelectors(chainID)
+	// Check if it's not in official selectors (any non-official chain is custom)
+	return !isInOfficialSelectors(chainID)
 }
 
 // isCustomSelector determines if a selector looks like a custom one
 func isCustomSelector(selector uint64) bool {
-	// Check if it has our custom high-bit pattern
-	return (selector & 0xC000000000000000) == 0xC000000000000000
+	// Check if it has our custom 0xE prefix pattern
+	return (selector & 0xF000000000000000) == 0xE000000000000000
 }
 
 // isInOfficialSelectors checks if chain ID exists in official selectors
@@ -56,15 +61,24 @@ func extractChainIdFromCustomSelector(selector uint64) (uint64, error) {
 		return 0, fmt.Errorf("not a custom selector: %d", selector)
 	}
 
-	// Brute force search within reasonable range
-	// This is acceptable since custom chains are typically in a known range
-	for chainID := uint64(1000000); chainID < 100000000; chainID++ {
-		if generateCustomChainSelector(chainID) == selector {
-			return chainID, nil
-		}
+	// Direct decoding: remove 0xE prefix to get chain ID (O(1) operation)
+	chainID := selector & 0x0FFFFFFFFFFFFFFF
+
+	// Verify the selector was generated with direct encoding
+	// by checking if re-encoding produces the same selector
+	if generateCustomChainSelector(chainID) == selector {
+		return chainID, nil
 	}
 
-	return 0, fmt.Errorf("could not reverse custom selector: %d", selector)
+	// If verification fails, this selector might use the old hash-based method
+	// or be from a very large chain ID that used hash fallback
+	return 0, fmt.Errorf("could not reverse custom selector: %d (possibly hash-based)", selector)
+}
+
+// populateCommonCustomChains no longer needed with direct encoding
+// Keeping function signature for backward compatibility
+func populateCommonCustomChains() {
+	// No-op: direct encoding eliminates need for pre-population
 }
 
 // Enhanced GetChainDetailsByChainIDAndFamily that supports custom chains
